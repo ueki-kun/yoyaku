@@ -10,13 +10,12 @@
         :root { --paper-color: #fff9ed; --grid-color: #ff9e9e; }
         body { font-family: sans-serif; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; margin: 0; background-color: #d7d7d7; padding-top: 20px; }
         
-        /* ロード画面：不透明 */
+        /* ロード画面 */
         #loadingOverlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: #ffffff; display: flex; flex-direction: column; justify-content: center; align-items: center;
             z-index: 2000; transition: opacity 0.5s ease;
         }
-        /* 進捗バーのスタイル */
         .progress-container {
             width: 70%; max-width: 300px; height: 12px; background: #eee;
             border-radius: 6px; overflow: hidden; margin-top: 20px; border: 1px solid #ddd;
@@ -36,7 +35,6 @@
         .genko-scroll-container { width: 100%; overflow: hidden; display: flex; justify-content: center; margin-bottom: 10px; }
         .genko-wrapper { background-color: white; border: 1px solid var(--grid-color); display: inline-block; transform-origin: top center; backface-visibility: hidden; }
         
-        /* 画面幅に応じたスケーリング（スマホはみ出し防止） */
         @media screen and (max-width: 450px) { .genko-wrapper { transform: scale(0.85); margin-bottom: -50px; } }
         @media screen and (max-width: 380px) { .genko-wrapper { transform: scale(0.75); margin-bottom: -90px; } }
 
@@ -60,7 +58,7 @@
 <body>
 
 <div id="loadingOverlay">
-    <div id="loadingText">辞書を読み込み中...</div>
+    <div id="loadingText">接続を確立中...</div>
     <div class="progress-container">
         <div id="progressBar"></div>
     </div>
@@ -94,39 +92,21 @@
         navigator.serviceWorker.register('sw.js');
     }
 
-    // 進捗表示を更新する関数
     function updateProgress(percent, text) {
         document.getElementById('progressBar').style.width = percent + "%";
         document.getElementById('loadingText').textContent = text;
     }
 
-    // --- 辞書読み込みのコアロジック ---
-    updateProgress(20, "サーバーへ接続中...");
-
-    let retryUsed = false;
-    let loadTimeout = setTimeout(() => {
-        if (!tokenizer) {
-            console.warn("自前サーバーが応答しないため、バックアップサーバーへ切り替えます...");
-            retryUsed = true;
-            loadKuromoji("https://unpkg.com/kuromoji@0.1.2/dict/");
-        }
-    }, 4000); // 4秒待って進まなければ外部へ
-
+    // --- 辞書読み込みの安定化ロジック ---
     function loadKuromoji(path) {
-        updateProgress(retryUsed ? 50 : 30, retryUsed ? "バックアップから取得中..." : "辞書データを取得中...");
+        updateProgress(30, "辞書データを取得中...");
         
         kuromoji.builder({ dicPath: path }).build((err, _tokenizer) => {
-            clearTimeout(loadTimeout);
             const overlay = document.getElementById('loadingOverlay');
 
             if (err) {
-                console.error("読み込み失敗:", path, err);
-                if (!retryUsed) {
-                    retryUsed = true;
-                    loadKuromoji("https://unpkg.com/kuromoji@0.1.2/dict/");
-                } else {
-                    updateProgress(0, "エラーが発生しました。再起動してください。");
-                }
+                console.error("読み込み失敗:", err);
+                updateProgress(0, "エラーが発生しました。再起動してください。");
                 return;
             }
 
@@ -143,10 +123,10 @@
         });
     }
 
-    // 最初に自分のサーバー(dict/)を試す
-    loadKuromoji("dict/");
+    // 最初から安定している外部サーバー(unpkg)を使用する設定に変更
+    loadKuromoji("https://unpkg.com/kuromoji@0.1.2/dict/");
 
-    // --- 以降、アプリの基本ロジック ---
+    // --- アプリ基本ロジック ---
     async function startTraining() {
         if (Notification.permission !== 'granted') await Notification.requestPermission();
         const input = document.getElementById('summaryInput');
@@ -168,7 +148,7 @@
                 document.getElementById('timer').textContent = "00:00";
                 clearInterval(timerInterval);
                 if (navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({ type: 'TIMER_DONE' });
-                alert("30分経過しました。要約を提出しましょう。");
+                alert("時間です。要約を提出しましょう！");
                 return;
             }
             const mins = Math.floor(remaining / 60);
@@ -192,22 +172,20 @@
         if (lastToken.pos === "記号") lastToken = tokens[tokens.length - 2];
         const surface = lastToken.surface_form;
 
-        if (surface.includes("です") || surface.includes("ます")) errors.push("・「です・ます」調は使えません。");
-        if (lastToken.pos === "名詞" && !["非自立", "代名詞"].includes(lastToken.pos_detail_1)) errors.push(`・体言止めは禁止です。`);
-        
-        const amb = ["かな", "かも", "だろ", "でしょう", "らしい", "みたい"];
-        if (amb.some(w => surface.includes(w) || lastToken.basic_form === w)) errors.push(`・文末の断定を避けています。`);
-        
-        if (tokens.filter(t => t.pos === "名詞").length < 3) errors.push("・具体性が足りません（名詞不足）。");
-        if (!/[。！？]/.test(text.slice(-1))) errors.push("・文末に句読点を打ちましょう。");
+        if (surface.includes("です") || surface.includes("ます")) errors.push("・「です・ます」禁止。");
+        if (lastToken.pos === "名詞" && !["非自立", "代名詞"].includes(lastToken.pos_detail_1)) errors.push(`・体言止め禁止。`);
+        const amb = ["かな", "かも", "だろ", "らしい", "みたい"];
+        if (amb.some(w => surface.includes(w) || lastToken.basic_form === w)) errors.push(`・文末を断定してください。`);
+        if (tokens.filter(t => t.pos === "名詞").length < 3) errors.push("・具体性が不足。");
+        if (!/[。！？]/.test(text.slice(-1))) errors.push("・文末に句読点を。");
 
         if (errors.length === 0) {
             iconArea.textContent = "○"; iconArea.className = "success";
-            msgArea.innerHTML = "<strong>合格です！お疲れ様でした。</strong>";
+            msgArea.innerHTML = "<strong>合格！</strong>";
             localStorage.removeItem('timerEndTime');
         } else {
             iconArea.textContent = "×"; iconArea.className = "error";
-            msgArea.innerHTML = "<strong>改善点：</strong><br>" + errors.join("<br>");
+            msgArea.innerHTML = "<strong>改善ポイント：</strong><br>" + errors.join("<br>");
         }
     }
 
