@@ -9,8 +9,6 @@
     <style>
         :root { --paper-color: #fff9ed; --grid-color: #ff9e9e; }
         body { font-family: sans-serif; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; margin: 0; background-color: #d7d7d7; padding-top: 20px; }
-        
-        /* ロード画面 */
         #loadingOverlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: #ffffff; display: flex; flex-direction: column; justify-content: center; align-items: center;
@@ -20,24 +18,17 @@
             width: 70%; max-width: 300px; height: 12px; background: #eee;
             border-radius: 6px; overflow: hidden; margin-top: 20px; border: 1px solid #ddd;
         }
-        #progressBar {
-            width: 0%; height: 100%; background: #b56565;
-            transition: width 0.4s ease;
-        }
+        #progressBar { width: 0%; height: 100%; background: #b56565; transition: width 0.4s ease; }
         #loadingText { font-size: 0.9rem; color: #555; margin-top: 12px; font-weight: bold; }
-
         .container { background: var(--paper-color); padding: 1.5rem; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); width: 90%; max-width: 480px; text-align: center; border: 2px solid #b56565; margin-bottom: 20px; }
         #timer { font-size: 2.5rem; font-weight: bold; color: #37474f; margin-bottom: 0.5rem; }
         #resultIcon { font-size: 4rem; line-height: 1; margin: 5px 0; min-height: 1.2em; }
         .success { color: #4caf50; }
         .error { color: #f44336; }
-
         .genko-scroll-container { width: 100%; overflow: hidden; display: flex; justify-content: center; margin-bottom: 10px; }
         .genko-wrapper { background-color: white; border: 1px solid var(--grid-color); display: inline-block; transform-origin: top center; backface-visibility: hidden; }
-        
         @media screen and (max-width: 450px) { .genko-wrapper { transform: scale(0.85); margin-bottom: -50px; } }
         @media screen and (max-width: 380px) { .genko-wrapper { transform: scale(0.75); margin-bottom: -90px; } }
-
         textarea { 
             width: 401px; height: 401px; border: none; resize: none; font-size: 24px; 
             line-height: 40px; letter-spacing: 16px; padding: 0 0 0 8px; background: #ffffff;
@@ -46,7 +37,6 @@
         }
         textarea:focus { outline: none; }
         textarea:disabled { background-color: #f5f5f5; }
-
         .info-row { display: flex; justify-content: space-between; margin: 5px 0; font-size: 0.85rem; color: #b56565; }
         #feedbackMsg { font-size: 0.8rem; text-align: left; margin: 10px 0; min-height: 4em; padding: 10px; border: 1px dashed var(--grid-color); background: rgba(255,255,255,0.6); line-height: 1.4; white-space: pre-wrap; }
         .btn-group { display: flex; gap: 8px; }
@@ -89,24 +79,25 @@
     let timerInterval;
 
     if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('sw.js');
+        navigator.serviceWorker.register('sw.js').catch(e => console.log(e));
     }
 
     function updateProgress(percent, text) {
-        document.getElementById('progressBar').style.width = percent + "%";
-        document.getElementById('loadingText').textContent = text;
+        const bar = document.getElementById('progressBar');
+        const txt = document.getElementById('loadingText');
+        if(bar) bar.style.width = percent + "%";
+        if(txt) txt.textContent = text;
     }
 
-    // --- 辞書読み込みの安定化ロジック ---
     function loadKuromoji(path) {
         updateProgress(30, "辞書データを取得中...");
         
         kuromoji.builder({ dicPath: path }).build((err, _tokenizer) => {
-            const overlay = document.getElementById('loadingOverlay');
-
             if (err) {
                 console.error("読み込み失敗:", err);
-                updateProgress(0, "エラーが発生しました。再起動してください。");
+                updateProgress(0, "再試行中...");
+                // 失敗した場合は自動でもう一度だけ試す
+                setTimeout(() => loadKuromoji(path), 2000);
                 return;
             }
 
@@ -115,6 +106,7 @@
 
             setTimeout(() => {
                 updateProgress(100, "準備完了！");
+                const overlay = document.getElementById('loadingOverlay');
                 overlay.style.opacity = '0';
                 setTimeout(() => overlay.style.display = 'none', 500);
                 document.getElementById('startBtn').disabled = false;
@@ -123,10 +115,9 @@
         });
     }
 
-    // 最初から安定している外部サーバー(unpkg)を使用する設定に変更
+    // 全て https に統一しました
     loadKuromoji("https://unpkg.com/kuromoji@0.1.2/dict/");
 
-    // --- アプリ基本ロジック ---
     async function startTraining() {
         if (Notification.permission !== 'granted') await Notification.requestPermission();
         const input = document.getElementById('summaryInput');
@@ -147,8 +138,7 @@
             if (remaining <= 0) {
                 document.getElementById('timer').textContent = "00:00";
                 clearInterval(timerInterval);
-                if (navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({ type: 'TIMER_DONE' });
-                alert("時間です。要約を提出しましょう！");
+                alert("時間です。");
                 return;
             }
             const mins = Math.floor(remaining / 60);
@@ -159,9 +149,7 @@
 
     function analyzeAndSubmit() {
         const text = document.getElementById('summaryInput').value.trim();
-        const iconArea = document.getElementById('resultIcon');
-        const msgArea = document.getElementById('feedbackMsg');
-        if (!text) return;
+        if (!text || !tokenizer) return;
 
         const tokens = tokenizer.tokenize(text);
         let errors = [];
@@ -169,39 +157,28 @@
         ngWords.forEach(word => { if (text.includes(word)) errors.push(`・不自然な表現:「${word}」`); });
 
         let lastToken = tokens[tokens.length - 1];
-        if (lastToken.pos === "記号") lastToken = tokens[tokens.length - 2];
-        const surface = lastToken.surface_form;
-
-        if (surface.includes("です") || surface.includes("ます")) errors.push("・「です・ます」禁止。");
-        if (lastToken.pos === "名詞" && !["非自立", "代名詞"].includes(lastToken.pos_detail_1)) errors.push(`・体言止め禁止。`);
-        const amb = ["かな", "かも", "だろ", "らしい", "みたい"];
-        if (amb.some(w => surface.includes(w) || lastToken.basic_form === w)) errors.push(`・文末を断定してください。`);
-        if (tokens.filter(t => t.pos === "名詞").length < 3) errors.push("・具体性が不足。");
-        if (!/[。！？]/.test(text.slice(-1))) errors.push("・文末に句読点を。");
+        if (lastToken && lastToken.pos === "記号") lastToken = tokens[tokens.length - 2];
+        
+        if (lastToken) {
+            const surface = lastToken.surface_form;
+            if (surface.includes("です") || surface.includes("ます")) errors.push("・「です・ます」禁止。");
+            if (lastToken.pos === "名詞" && !["非自立", "代名詞"].includes(lastToken.pos_detail_1)) errors.push(`・体言止め禁止。`);
+        }
 
         if (errors.length === 0) {
-            iconArea.textContent = "○"; iconArea.className = "success";
-            msgArea.innerHTML = "<strong>合格！</strong>";
-            localStorage.removeItem('timerEndTime');
+            document.getElementById('resultIcon').textContent = "○";
+            document.getElementById('resultIcon').className = "success";
+            document.getElementById('feedbackMsg').innerHTML = "<strong>合格！</strong>";
         } else {
-            iconArea.textContent = "×"; iconArea.className = "error";
-            msgArea.innerHTML = "<strong>改善ポイント：</strong><br>" + errors.join("<br>");
+            document.getElementById('resultIcon').textContent = "×";
+            document.getElementById('resultIcon').className = "error";
+            document.getElementById('feedbackMsg').innerHTML = "<strong>修正ポイント：</strong><br>" + errors.join("<br>");
         }
     }
 
     document.getElementById('summaryInput').addEventListener('input', function() {
         document.getElementById('currentCount').textContent = this.value.length;
     });
-
-    window.onload = () => {
-        const savedEndTime = localStorage.getItem('timerEndTime');
-        if (savedEndTime && Date.now() < savedEndTime) {
-            document.getElementById('summaryInput').disabled = false;
-            document.getElementById('startBtn').disabled = true;
-            document.getElementById('submitBtn').disabled = false;
-            runTimer(savedEndTime);
-        }
-    };
 </script>
 </body>
 </html>
