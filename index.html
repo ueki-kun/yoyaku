@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>極・原稿用紙要約アプリ</title>
+    <link rel="manifest" href="manifest.json">
+    <script src="https://unpkg.com/kuromoji@0.1.2/build/kuromoji.js"></script>
+    <style>
+        :root { --paper-color: #fff9ed; --grid-color: #ff9e9e; }
+        body { font-family: sans-serif; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; margin: 0; background-color: #d7d7d7; padding-top: 20px; }
+        
+        /* ロード画面（完全に不透明に修正） */
+        #loadingOverlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #ffffff; /* 透けない白に変更 */
+            display: flex; flex-direction: column; justify-content: center; align-items: center;
+            z-index: 2000; transition: opacity 0.5s ease;
+        }
+        .spinner {
+            width: 50px; height: 50px; border: 5px solid #ddd;
+            border-top: 5px solid #b56565; border-radius: 50%;
+            animation: spin 1s linear infinite; margin-bottom: 15px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        .container { background: var(--paper-color); padding: 1.5rem; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); width: 90%; max-width: 480px; text-align: center; border: 2px solid #b56565; margin-bottom: 20px; }
+        #timer { font-size: 2.5rem; font-weight: bold; color: #37474f; margin-bottom: 0.5rem; }
+        #resultIcon { font-size: 4rem; line-height: 1; margin: 5px 0; min-height: 1.2em; }
+        .success { color: #4caf50; }
+        .error { color: #f44336; }
+
+        /* 原稿用紙のはみ出し防止設定 */
+        .genko-scroll-container {
+            width: 100%;
+            overflow-x: auto; /* 万が一のためのスクロール */
+            display: flex;
+            justify-content: center;
+            margin-bottom: 10px;
+        }
+        .genko-wrapper { 
+            background-color: white; 
+            border: 1px solid var(--grid-color); 
+            display: inline-block; 
+            transform-origin: top center;
+        }
+        
+        /* スマホの画面幅に合わせて原稿用紙を縮小する命令 */
+        @media screen and (max-width: 450px) {
+            .genko-wrapper {
+                transform: scale(0.8); /* 80%に縮小 */
+                margin-bottom: -70px; /* 縮小で空いた隙間を詰める */
+            }
+        }
+        @media screen and (max-width: 360px) {
+            .genko-wrapper {
+                transform: scale(0.7); /* さらに小さい画面では70% */
+                margin-bottom: -110px;
+            }
+        }
+
+        textarea { width: 401px; height: 401px; border: none; resize: none; font-size: 24px; line-height: 40px; letter-spacing: 16px; padding: 0 0 0 8px; background: transparent; background-image: linear-gradient(var(--grid-color) 1px, transparent 1px), linear-gradient(90deg, var(--grid-color) 1px, transparent 1px); background-size: 40px 40px; font-family: 'Courier New', monospace; display: block; }
+        textarea:focus { outline: none; }
+        textarea:disabled { background-color: #f5f5f5; cursor: not-allowed; }
+
+        .info-row { display: flex; justify-content: space-between; margin: 5px 0; font-size: 0.85rem; color: #b56565; }
+        #feedbackMsg { font-size: 0.8rem; text-align: left; margin: 10px 0; min-height: 4em; padding: 10px; border: 1px dashed var(--grid-color); background: rgba(255,255,255,0.6); line-height: 1.4; white-space: pre-wrap; }
+        .btn-group { display: flex; gap: 8px; }
+        button { background-color: #2196f3; color: white; border: none; padding: 14px; border-radius: 12px; cursor: pointer; width: 100%; font-size: 1rem; font-weight: bold; }
+        #startBtn { background-color: #ff9800; }
+        button:disabled { background-color: #b0bec5; }
+    </style>
+</head>
+<body>
+
+<div id="loadingOverlay">
+    <div class="spinner"></div>
+    <div id="loadingText">辞書を読み込み中...</div>
+</div>
+
+<div class="container">
+    <div id="timer">30:00</div>
+    <div id="resultIcon"></div>
+    <div class="genko-scroll-container">
+        <div class="genko-wrapper"><textarea id="summaryInput" maxlength="100" placeholder="「開始」でスタート" disabled></textarea></div>
+    </div>
+    <div class="info-row"><span id="statusLabel">準備中...</span><span><span id="currentCount">0</span> / 100文字</span></div>
+    <div id="feedbackMsg"></div>
+    <div class="btn-group">
+        <button id="startBtn" onclick="startTraining()" disabled>トレーニング開始</button>
+        <button id="submitBtn" onclick="analyzeAndSubmit()" disabled>判定して送信</button>
+    </div>
+</div>
+
+<script>
+    const DURATION = 30 * 60;
+    let tokenizer = null;
+    let timerInterval;
+
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js').then(() => console.log("SW Registered"));
+    }
+
+    kuromoji.builder({ dicPath: "https://unpkg.com/kuromoji@0.1.2/dict/" }).build((err, _tokenizer) => {
+        const overlay = document.getElementById('loadingOverlay');
+        if (err) {
+            document.getElementById('loadingText').textContent = "エラーが発生しました。再読み込みしてください。";
+            return;
+        }
+        tokenizer = _tokenizer;
+        overlay.style.opacity = '0';
+        setTimeout(() => overlay.style.display = 'none', 500);
+        document.getElementById('startBtn').disabled = false;
+        document.getElementById('statusLabel').textContent = "準備完了";
+    });
+
+    async function startTraining() {
+        if (Notification.permission !== 'granted') await Notification.requestPermission();
+        const input = document.getElementById('summaryInput');
+        input.disabled = false;
+        input.focus();
+        document.getElementById('startBtn').disabled = true;
+        document.getElementById('submitBtn').disabled = false;
+        document.getElementById('statusLabel').textContent = "計測中...";
+        const endTime = Date.now() + DURATION * 1000;
+        localStorage.setItem('timerEndTime', endTime);
+        runTimer(endTime);
+    }
+
+    function runTimer(endTime) {
+        if (timerInterval) clearInterval(timerInterval);
+        timerInterval = setInterval(() => {
+            const remaining = Math.ceil((endTime - Date.now()) / 1000);
+            if (remaining <= 0) {
+                document.getElementById('timer').textContent = "00:00";
+                clearInterval(timerInterval);
+                if (navigator.serviceWorker.controller) navigator.serviceWorker.controller.postMessage({ type: 'TIMER_DONE' });
+                alert("30分経過しました。");
+                return;
+            }
+            const mins = Math.floor(remaining / 60);
+            const secs = remaining % 60;
+            document.getElementById('timer').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+        }, 1000);
+    }
+
+    function analyzeAndSubmit() {
+        const text = document.getElementById('summaryInput').value.trim();
+        const iconArea = document.getElementById('resultIcon');
+        const msgArea = document.getElementById('feedbackMsg');
+        if (!text) return;
+        const tokens = tokenizer.tokenize(text);
+        let errors = [];
+        const ngWords = ["えーと", "あのー", "なんか", "多分", "マジで", "ヤバい", "的な", "一応", "思う"];
+        ngWords.forEach(word => { if (text.includes(word)) errors.push(`・不適切な単語:「${word}」`); });
+        let lastToken = tokens[tokens.length - 1];
+        if (lastToken.pos === "記号") lastToken = tokens[tokens.length - 2];
+        const surface = lastToken.surface_form;
+        if (surface.includes("です") || surface.includes("ます")) errors.push("・「です・ます」禁止。");
+        if (lastToken.pos === "名詞" && !["非自立", "代名詞"].includes(lastToken.pos_detail_1)) errors.push(`・体言止め禁止。`);
+        const amb = ["かな", "かも", "だろ", "でしょう", "らしい", "みたい"];
+        if (amb.some(w => surface.includes(w) || lastToken.basic_form === w)) errors.push(`・文末が曖昧。`);
+        if (tokens.filter(t => t.pos === "名詞").length < 3) errors.push("・具体性不足（名詞不足）。");
+        if (!/[。！？]/.test(text.slice(-1))) errors.push("・文末に句読点が必要。");
+
+        if (errors.length === 0) {
+            iconArea.textContent = "○"; iconArea.className = "success";
+            msgArea.innerHTML = "<strong>合格です！</strong>";
+            localStorage.removeItem('timerEndTime');
+        } else {
+            iconArea.textContent = "×"; iconArea.className = "error";
+            msgArea.innerHTML = "<strong>修正ポイント：</strong><br>" + errors.join("<br>");
+        }
+    }
+
+    document.getElementById('summaryInput').addEventListener('input', function() {
+        document.getElementById('currentCount').textContent = this.value.length;
+    });
+
+    window.onload = () => {
+        const savedEndTime = localStorage.getItem('timerEndTime');
+        if (savedEndTime && Date.now() < savedEndTime) {
+            document.getElementById('summaryInput').disabled = false;
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('submitBtn').disabled = false;
+            runTimer(savedEndTime);
+        }
+    };
+</script>
+</body>
+</html>
