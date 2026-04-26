@@ -10,6 +10,7 @@
         :root { --paper-color: #fff9ed; --grid-color: #ff9e9e; }
         body { font-family: sans-serif; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; margin: 0; background-color: #d7d7d7; padding-top: 20px; }
         
+        /* ロード画面 */
         #loadingOverlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: #ffffff; display: flex; flex-direction: column; justify-content: center; align-items: center;
@@ -54,7 +55,7 @@
 <body>
 
 <div id="loadingOverlay">
-    <div id="loadingText">準備を開始します...</div>
+    <div id="loadingText">辞書データを準備中...</div>
     <div class="progress-container">
         <div id="progressBar"></div>
     </div>
@@ -91,38 +92,49 @@
         if(txt) txt.textContent = text;
     }
 
-    // --- 辞書読み込み：プランA（外部サーバー固定） ---
+    // --- 最強の辞書読み込みロジック ---
     function loadKuromoji() {
-        const dicURL = "https://unpkg.com/kuromoji@0.1.2/dict/";
-        updateProgress(30, "辞書データを取得中...");
+        const localPath = "dict/"; // 自前サーバー
+        const backupPath = "https://unpkg.com/kuromoji@0.1.2/dict/"; // バックアップ
+
+        updateProgress(30, "データを取得中...");
         
-        kuromoji.builder({ dicPath: dicURL }).build((err, _tokenizer) => {
+        // まずは自前を試す
+        kuromoji.builder({ dicPath: localPath }).build((err, _tokenizer) => {
             if (err) {
-                console.error("読み込み失敗:", err);
-                updateProgress(0, "エラー発生。再試行してください。");
+                console.warn("自前辞書の読み込みに失敗しました。外部を試します。", err);
+                // 自前がダメなら外部へ
+                kuromoji.builder({ dicPath: backupPath }).build((err2, _tokenizer2) => {
+                    if (err2) {
+                        updateProgress(0, "エラー：通信環境を確認してください。");
+                        return;
+                    }
+                    finalizeSetup(_tokenizer2);
+                });
                 return;
             }
-
-            updateProgress(85, "解析エンジンを起動...");
-            tokenizer = _tokenizer;
-
-            setTimeout(() => {
-                updateProgress(100, "準備完了！");
-                const overlay = document.getElementById('loadingOverlay');
-                overlay.style.opacity = '0';
-                setTimeout(() => {
-                    overlay.style.display = 'none';
-                    document.getElementById('startBtn').disabled = false;
-                    document.getElementById('statusLabel').textContent = "準備完了";
-                }, 500);
-            }, 300);
+            finalizeSetup(_tokenizer);
         });
     }
 
-    // 起動時に辞書ロードを開始
+    function finalizeSetup(_tokenizer) {
+        updateProgress(85, "エンジンを起動...");
+        tokenizer = _tokenizer;
+        setTimeout(() => {
+            updateProgress(100, "準備完了！");
+            const overlay = document.getElementById('loadingOverlay');
+            overlay.style.opacity = '0';
+            setTimeout(() => {
+                overlay.style.display = 'none';
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('statusLabel').textContent = "準備完了";
+            }, 500);
+        }, 300);
+    }
+
+    // 読み込み開始
     loadKuromoji();
 
-    // --- トレーニングロジック ---
     async function startTraining() {
         if (Notification.permission !== 'granted') await Notification.requestPermission();
         const input = document.getElementById('summaryInput');
@@ -159,15 +171,15 @@
         const tokens = tokenizer.tokenize(text);
         let errors = [];
         const ngWords = ["えーと", "あのー", "なんか", "多分", "マジで", "ヤバい", "的な", "一応", "思う"];
-        ngWords.forEach(word => { if (text.includes(word)) errors.push(`・表現の修正:「${word}」`); });
+        ngWords.forEach(word => { if (text.includes(word)) errors.push(`・表現:「${word}」`); });
 
         let lastToken = tokens[tokens.length - 1];
         if (lastToken && lastToken.pos === "記号") lastToken = tokens[tokens.length - 2];
         
         if (lastToken) {
             const surface = lastToken.surface_form;
-            if (surface.includes("です") || surface.includes("ます")) errors.push("・「だ・である」調に。");
-            if (lastToken.pos === "名詞" && !["非自立", "代名詞"].includes(lastToken.pos_detail_1)) errors.push(`・体言止めは避ける。`);
+            if (surface.includes("です") || surface.includes("ます")) errors.push("・「です・ます」禁止。");
+            if (lastToken.pos === "名詞" && !["非自立", "代名詞"].includes(lastToken.pos_detail_1)) errors.push(`・体言止め禁止。`);
         }
 
         const iconArea = document.getElementById('resultIcon');
