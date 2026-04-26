@@ -113,7 +113,7 @@
     }
 
     // 辞書読み込み：unpkgを使用し、完了時にロード画面を非表示にする
-    kuromoji.builder({ dicPath: "https://unpkg.com/kuromoji@0.1.2/dict/" }).build((err, _tokenizer) => {
+    kuromoji.builder({ dicPath: "dict/" }).build((err, _tokenizer) => {
         const overlay = document.getElementById('loadingOverlay');
         if (err) {
             document.getElementById('loadingText').textContent = "読み込みエラーが発生しました。再起動してください。";
