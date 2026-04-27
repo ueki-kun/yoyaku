@@ -10,7 +10,6 @@
         :root { --paper-color: #fff9ed; --grid-color: #ff9e9e; }
         body { font-family: sans-serif; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; margin: 0; background-color: #d7d7d7; padding-top: 20px; }
         
-        /* ロード画面 */
         #loadingOverlay {
             position: fixed; top: 0; left: 0; width: 100%; height: 100%;
             background: #ffffff; display: flex; flex-direction: column; justify-content: center; align-items: center;
@@ -55,7 +54,7 @@
 <body>
 
 <div id="loadingOverlay">
-    <div id="loadingText">辞書データを準備中...</div>
+    <div id="loadingText">辞書データを読み込み中...</div>
     <div class="progress-container">
         <div id="progressBar"></div>
     </div>
@@ -92,21 +91,23 @@
         if(txt) txt.textContent = text;
     }
 
-    // --- 最強の辞書読み込みロジック ---
+    // --- 辞書読み込み：自動リカバリー版 ---
     function loadKuromoji() {
-        const localPath = "dict/"; // 自前サーバー
-        const backupPath = "https://unpkg.com/kuromoji@0.1.2/dict/"; // バックアップ
+        const localPath = "dict/"; // 自分のGitHub
+        const backupPath = "https://unpkg.com/kuromoji@0.1.2/dict/"; // 外部
 
-        updateProgress(30, "データを取得中...");
-        
-        // まずは自前を試す
+        updateProgress(20, "自前サーバーを確認中...");
+
+        // まず自前を試す
         kuromoji.builder({ dicPath: localPath }).build((err, _tokenizer) => {
             if (err) {
-                console.warn("自前辞書の読み込みに失敗しました。外部を試します。", err);
-                // 自前がダメなら外部へ
+                // 自前で404等が出た場合、即座にバックアップへ切り替え
+                console.warn("自前辞書にアクセスできません。外部に切り替えます。", err);
+                updateProgress(40, "外部サーバーからデータを取得中...");
+                
                 kuromoji.builder({ dicPath: backupPath }).build((err2, _tokenizer2) => {
                     if (err2) {
-                        updateProgress(0, "エラー：通信環境を確認してください。");
+                        updateProgress(0, "エラー：通信を確認してください。");
                         return;
                     }
                     finalizeSetup(_tokenizer2);
@@ -132,7 +133,7 @@
         }, 300);
     }
 
-    // 読み込み開始
+    // 起動
     loadKuromoji();
 
     async function startTraining() {
@@ -171,14 +172,14 @@
         const tokens = tokenizer.tokenize(text);
         let errors = [];
         const ngWords = ["えーと", "あのー", "なんか", "多分", "マジで", "ヤバい", "的な", "一応", "思う"];
-        ngWords.forEach(word => { if (text.includes(word)) errors.push(`・表現:「${word}」`); });
+        ngWords.forEach(word => { if (text.includes(word)) errors.push(`・話し言葉:「${word}」`); });
 
         let lastToken = tokens[tokens.length - 1];
         if (lastToken && lastToken.pos === "記号") lastToken = tokens[tokens.length - 2];
         
         if (lastToken) {
             const surface = lastToken.surface_form;
-            if (surface.includes("です") || surface.includes("ます")) errors.push("・「です・ます」禁止。");
+            if (surface.includes("です") || surface.includes("ます")) errors.push("・「だ・である」に統一。");
             if (lastToken.pos === "名詞" && !["非自立", "代名詞"].includes(lastToken.pos_detail_1)) errors.push(`・体言止め禁止。`);
         }
 
