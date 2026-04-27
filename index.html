@@ -3,40 +3,61 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>極・原稿用紙要約アプリ(BudouX版)</title>
+    <title>極・原稿用紙要約アプリ</title>
     <script src="https://unpkg.com/budoux/bundle/budoux-ja.min.js"></script>
     <style>
-        :root { --paper-color: #fff9ed; --grid-color: #ff9e9e; }
+        :root { --paper-color: #fff9ed; --grid-color: #ff9e9e; --success-bg: #e8f5e9; --error-bg: #ffebee; }
         body { font-family: sans-serif; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; margin: 0; background-color: #d7d7d7; padding-top: 20px; }
-        .container { background: var(--paper-color); padding: 1.5rem; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); width: 90%; max-width: 480px; text-align: center; border: 2px solid #b56565; }
+        
+        .container { background: var(--paper-color); padding: 1.5rem; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); width: 90%; max-width: 480px; text-align: center; border: 2px solid #b56565; position: relative; }
         #timer { font-size: 2.5rem; font-weight: bold; color: #37474f; margin-bottom: 0.5rem; }
-        #resultIcon { font-size: 4rem; line-height: 1; margin: 5px 0; min-height: 1.2em; }
-        .genko-wrapper { background-color: white; border: 1px solid var(--grid-color); display: inline-block; }
+        
+        .genko-wrapper { background-color: white; border: 1px solid var(--grid-color); display: inline-block; margin-bottom: 10px; }
         textarea { width: 401px; height: 401px; border: none; resize: none; font-size: 24px; line-height: 40px; letter-spacing: 16px; padding: 0 0 0 8px; background-image: linear-gradient(to bottom, transparent 39px, var(--grid-color) 40px), linear-gradient(90deg, transparent 39px, var(--grid-color) 40px); background-size: 40px 40px; font-family: 'Courier New', monospace; display: block; }
-        .info-row { display: flex; justify-content: space-between; margin: 5px 0; font-size: 0.85rem; color: #b56565; }
-        #feedbackMsg { font-size: 0.8rem; text-align: left; margin: 10px 0; min-height: 4em; padding: 10px; border: 1px dashed var(--grid-color); background: rgba(255,255,255,0.6); line-height: 1.4; white-space: pre-wrap; }
+        
+        /* 判定結果画面（隠し画面） */
+        #resultOverlay {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: none; flex-direction: column; justify-content: center; align-items: center;
+            border-radius: 12px; z-index: 100; backdrop-filter: blur(5px);
+        }
+        .result-card { background: white; width: 85%; padding: 20px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); border: 4px solid #ccc; }
+        #resIcon { font-size: 5rem; margin-bottom: 10px; }
+        #resTitle { font-size: 1.8rem; font-weight: bold; margin-bottom: 15px; }
+        #resDetails { font-size: 0.9rem; text-align: left; color: #555; background: #f9f9f9; padding: 15px; border-radius: 8px; line-height: 1.6; margin-bottom: 20px; }
+
         .btn-group { display: flex; gap: 8px; }
         button { background-color: #2196f3; color: white; border: none; padding: 14px; border-radius: 12px; cursor: pointer; width: 100%; font-size: 1rem; font-weight: bold; }
         #startBtn { background-color: #ff9800; }
-        button:disabled { background-color: #b0bec5; }
+        .retry-btn { background-color: #555; margin-top: 10px; }
     </style>
 </head>
 <body>
 
 <div class="container">
     <div id="timer">30:00</div>
-    <div id="resultIcon"></div>
+    
     <div class="genko-wrapper">
         <textarea id="summaryInput" maxlength="100" placeholder="「開始」でスタート" disabled></textarea>
     </div>
-    <div class="info-row">
-        <span id="statusLabel">準備完了</span>
+
+    <div class="info-row" style="display:flex; justify-content:space-between; font-size:0.8rem; color:#b56565; margin-bottom:10px;">
+        <span>準備完了</span>
         <span><span id="currentCount">0</span> / 100文字</span>
     </div>
-    <div id="feedbackMsg"></div>
+
     <div class="btn-group">
         <button id="startBtn" onclick="startTraining()">トレーニング開始</button>
         <button id="submitBtn" onclick="analyzeAndSubmit()" disabled>判定して送信</button>
+    </div>
+
+    <div id="resultOverlay">
+        <div class="result-card" id="resultCard">
+            <div id="resIcon"></div>
+            <div id="resTitle"></div>
+            <div id="resDetails"></div>
+            <button class="retry-btn" onclick="closeResult()">もう一度挑戦</button>
+        </div>
     </div>
 </div>
 
@@ -45,9 +66,8 @@
     let timerInterval;
 
     function startTraining() {
-        const input = document.getElementById('summaryInput');
-        input.disabled = false;
-        input.focus();
+        document.getElementById('summaryInput').disabled = false;
+        document.getElementById('summaryInput').focus();
         document.getElementById('startBtn').disabled = true;
         document.getElementById('submitBtn').disabled = false;
         const endTime = Date.now() + 1800000;
@@ -63,38 +83,41 @@
         if (!text) return;
 
         let errors = [];
-        // BudouXで文章を意味の区切りに分割
         const phrases = parser.parse(text);
 
-        // 1. です・ます判定（文末に「です」「ます」「でした」「ました」があるか）
-        const desumasuPattern = /(です|ます|でした|ました)(。|！|？|)$/;
-        if (desumasuPattern.test(text)) {
-            errors.push("・「です・ます」が含まれています。「だ・である」に直しましょう。");
-        }
-
-        // 2. NGワード（話し言葉）チェック
-        const ngWords = ["えーと", "あのー", "なんか", "マジで", "ヤバい"];
-        ngWords.forEach(word => {
-            if (text.includes(word)) errors.push(`・不要な言葉:「${word}」`);
-        });
-
-        // 3. 文末の締まりチェック（体言止め等の簡易判定）
+        // ルール判定
+        if (/(です|ます|でした|ました)(。|！|？|)$/.test(text)) errors.push("・「です・ます」が含まれています（だ・である調へ）");
+        const ngWords = ["えーと", "あのー", "なんか", "マジで"];
+        ngWords.forEach(word => { if (text.includes(word)) errors.push(`・話し言葉「${word}」が含まれています`); });
         const lastPhrase = phrases[phrases.length - 1];
-        const okEnds = ["だ", "た", "る", "ない", "い"];
-        if (!okEnds.some(end => lastPhrase.endsWith(end)) && !text.endsWith("。")) {
-            errors.push("・文末を「〜だ」「〜た」などで適切に締めてください。");
-        }
+        if (!["だ", "た", "る", "ない", "い", "。"].some(end => lastPhrase.endsWith(end))) errors.push("・文末が不自然です（適切に締めてください）");
 
-        const iconArea = document.getElementById('resultIcon');
-        const msgArea = document.getElementById('feedbackMsg');
+        // 結果画面の表示
+        const overlay = document.getElementById('resultOverlay');
+        const card = document.getElementById('resultCard');
+        const icon = document.getElementById('resIcon');
+        const title = document.getElementById('resTitle');
+        const details = document.getElementById('resDetails');
 
+        overlay.style.display = "flex";
+        
         if (errors.length === 0) {
-            iconArea.textContent = "○"; iconArea.className = "success";
-            msgArea.innerHTML = "<strong>合格！</strong> 正確な要約です。";
+            icon.textContent = "🉐";
+            title.textContent = "見事、合格！";
+            title.style.color = "#2e7d32";
+            card.style.borderColor = "#4caf50";
+            details.innerHTML = "完璧な要約です。文末表現、言葉選びともに非常に洗練されています。この調子で続けましょう！";
         } else {
-            iconArea.textContent = "×"; iconArea.className = "error";
-            msgArea.innerHTML = "<strong>修正ポイント：</strong><br>" + errors.join("<br>");
+            icon.textContent = "㊙️";
+            title.textContent = "要・改善点あり";
+            title.style.color = "#c62828";
+            card.style.borderColor = "#f44336";
+            details.innerHTML = "<strong>以下の点を修正してみましょう：</strong><br><br>" + errors.join("<br>");
         }
+    }
+
+    function closeResult() {
+        document.getElementById('resultOverlay').style.display = "none";
     }
 
     document.getElementById('summaryInput').addEventListener('input', function() {
