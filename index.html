@@ -4,45 +4,22 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>極・原稿用紙要約アプリ</title>
-    <link rel="manifest" href="manifest.json">
     <script src="https://unpkg.com/kuromoji@0.1.2/build/kuromoji.js"></script>
     <style>
         :root { --paper-color: #fff9ed; --grid-color: #ff9e9e; }
         body { font-family: sans-serif; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; margin: 0; background-color: #d7d7d7; padding-top: 20px; }
-        
-        #loadingOverlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: #ffffff; display: flex; flex-direction: column; justify-content: center; align-items: center;
-            z-index: 2000; transition: opacity 0.5s ease;
-        }
-        .progress-container {
-            width: 70%; max-width: 300px; height: 12px; background: #eee;
-            border-radius: 6px; overflow: hidden; margin-top: 20px; border: 1px solid #ddd;
-        }
+        #loadingOverlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #ffffff; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 2000; transition: opacity 0.5s ease; }
+        .progress-container { width: 70%; max-width: 300px; height: 12px; background: #eee; border-radius: 6px; overflow: hidden; margin-top: 20px; border: 1px solid #ddd; }
         #progressBar { width: 0%; height: 100%; background: #b56565; transition: width 0.4s ease; }
         #loadingText { font-size: 0.9rem; color: #555; margin-top: 12px; font-weight: bold; }
-
         .container { background: var(--paper-color); padding: 1.5rem; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); width: 90%; max-width: 480px; text-align: center; border: 2px solid #b56565; margin-bottom: 20px; }
         #timer { font-size: 2.5rem; font-weight: bold; color: #37474f; margin-bottom: 0.5rem; }
         #resultIcon { font-size: 4rem; line-height: 1; margin: 5px 0; min-height: 1.2em; }
         .success { color: #4caf50; }
         .error { color: #f44336; }
-
         .genko-scroll-container { width: 100%; overflow: hidden; display: flex; justify-content: center; margin-bottom: 10px; }
-        .genko-wrapper { background-color: white; border: 1px solid var(--grid-color); display: inline-block; transform-origin: top center; backface-visibility: hidden; }
-        
-        @media screen and (max-width: 450px) { .genko-wrapper { transform: scale(0.85); margin-bottom: -50px; } }
-        @media screen and (max-width: 380px) { .genko-wrapper { transform: scale(0.75); margin-bottom: -90px; } }
-
-        textarea { 
-            width: 401px; height: 401px; border: none; resize: none; font-size: 24px; 
-            line-height: 40px; letter-spacing: 16px; padding: 0 0 0 8px; background: #ffffff;
-            background-image: linear-gradient(to bottom, transparent 39px, var(--grid-color) 40px), linear-gradient(90deg, transparent 39px, var(--grid-color) 40px);
-            background-size: 40px 40px; font-family: 'Courier New', monospace; display: block;
-        }
-        textarea:focus { outline: none; }
-        textarea:disabled { background-color: #f5f5f5; }
-
+        .genko-wrapper { background-color: white; border: 1px solid var(--grid-color); display: inline-block; transform-origin: top center; }
+        textarea { width: 401px; height: 401px; border: none; resize: none; font-size: 24px; line-height: 40px; letter-spacing: 16px; padding: 0 0 0 8px; background: #ffffff; background-image: linear-gradient(to bottom, transparent 39px, var(--grid-color) 40px), linear-gradient(90deg, transparent 39px, var(--grid-color) 40px); background-size: 40px 40px; font-family: 'Courier New', monospace; display: block; }
         .info-row { display: flex; justify-content: space-between; margin: 5px 0; font-size: 0.85rem; color: #b56565; }
         #feedbackMsg { font-size: 0.8rem; text-align: left; margin: 10px 0; min-height: 4em; padding: 10px; border: 1px dashed var(--grid-color); background: rgba(255,255,255,0.6); line-height: 1.4; white-space: pre-wrap; }
         .btn-group { display: flex; gap: 8px; }
@@ -54,7 +31,7 @@
 <body>
 
 <div id="loadingOverlay">
-    <div id="loadingText">辞書データを読み込み中...</div>
+    <div id="loadingText">外部サーバーから辞書を取得中...</div>
     <div class="progress-container">
         <div id="progressBar"></div>
     </div>
@@ -82,7 +59,6 @@
 <script>
     const DURATION = 30 * 60;
     let tokenizer = null;
-    let timerInterval;
 
     function updateProgress(percent, text) {
         const bar = document.getElementById('progressBar');
@@ -91,74 +67,52 @@
         if(txt) txt.textContent = text;
     }
 
-    // --- 辞書読み込み：自動リカバリー版 ---
+    // --- 外部サーバー(unpkg)から直接読み込む設定 ---
     function loadKuromoji() {
-        const localPath = "dict/"; // 自分のGitHub
-        const backupPath = "https://unpkg.com/kuromoji@0.1.2/dict/"; // 外部
+        // あなたのGitHubのファイルは使いません。常に外部から取得します。
+        const dicURL = "https://unpkg.com/kuromoji@0.1.2/dict/";
+        
+        updateProgress(30, "辞書データをダウンロード中...");
 
-        updateProgress(20, "自前サーバーを確認中...");
-
-        // まず自前を試す
-        kuromoji.builder({ dicPath: localPath }).build((err, _tokenizer) => {
+        kuromoji.builder({ dicPath: dicURL }).build((err, _tokenizer) => {
             if (err) {
-                // 自前で404等が出た場合、即座にバックアップへ切り替え
-                console.warn("自前辞書にアクセスできません。外部に切り替えます。", err);
-                updateProgress(40, "外部サーバーからデータを取得中...");
-                
-                kuromoji.builder({ dicPath: backupPath }).build((err2, _tokenizer2) => {
-                    if (err2) {
-                        updateProgress(0, "エラー：通信を確認してください。");
-                        return;
-                    }
-                    finalizeSetup(_tokenizer2);
-                });
+                console.error("ロード失敗:", err);
+                updateProgress(0, "通信エラー。再読み込みしてください。");
                 return;
             }
-            finalizeSetup(_tokenizer);
+
+            updateProgress(85, "解析エンジンを起動...");
+            tokenizer = _tokenizer;
+
+            setTimeout(() => {
+                updateProgress(100, "準備完了！");
+                const overlay = document.getElementById('loadingOverlay');
+                overlay.style.opacity = '0';
+                setTimeout(() => {
+                    overlay.style.display = 'none';
+                    document.getElementById('startBtn').disabled = false;
+                    document.getElementById('statusLabel').textContent = "準備完了";
+                }, 500);
+            }, 300);
         });
     }
 
-    function finalizeSetup(_tokenizer) {
-        updateProgress(85, "エンジンを起動...");
-        tokenizer = _tokenizer;
-        setTimeout(() => {
-            updateProgress(100, "準備完了！");
-            const overlay = document.getElementById('loadingOverlay');
-            overlay.style.opacity = '0';
-            setTimeout(() => {
-                overlay.style.display = 'none';
-                document.getElementById('startBtn').disabled = false;
-                document.getElementById('statusLabel').textContent = "準備完了";
-            }, 500);
-        }, 300);
-    }
-
-    // 起動
     loadKuromoji();
 
     async function startTraining() {
-        if (Notification.permission !== 'granted') await Notification.requestPermission();
         const input = document.getElementById('summaryInput');
         input.disabled = false;
         input.focus();
         document.getElementById('startBtn').disabled = true;
         document.getElementById('submitBtn').disabled = false;
         document.getElementById('statusLabel').textContent = "計測中...";
-        const endTime = Date.now() + DURATION * 1000;
-        localStorage.setItem('timerEndTime', endTime);
-        runTimer(endTime);
+        runTimer(Date.now() + DURATION * 1000);
     }
 
     function runTimer(endTime) {
-        if (timerInterval) clearInterval(timerInterval);
-        timerInterval = setInterval(() => {
+        setInterval(() => {
             const remaining = Math.ceil((endTime - Date.now()) / 1000);
-            if (remaining <= 0) {
-                document.getElementById('timer').textContent = "00:00";
-                clearInterval(timerInterval);
-                alert("時間です。");
-                return;
-            }
+            if (remaining <= 0) return;
             const mins = Math.floor(remaining / 60);
             const secs = remaining % 60;
             document.getElementById('timer').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
@@ -168,49 +122,24 @@
     function analyzeAndSubmit() {
         const text = document.getElementById('summaryInput').value.trim();
         if (!text || !tokenizer) return;
-
         const tokens = tokenizer.tokenize(text);
         let errors = [];
-        const ngWords = ["えーと", "あのー", "なんか", "多分", "マジで", "ヤバい", "的な", "一応", "思う"];
-        ngWords.forEach(word => { if (text.includes(word)) errors.push(`・話し言葉:「${word}」`); });
-
-        let lastToken = tokens[tokens.length - 1];
-        if (lastToken && lastToken.pos === "記号") lastToken = tokens[tokens.length - 2];
+        const ngWords = ["えーと", "あのー", "なんか"];
+        ngWords.forEach(word => { if (text.includes(word)) errors.push(`・不要な語:「${word}」`); });
         
-        if (lastToken) {
-            const surface = lastToken.surface_form;
-            if (surface.includes("です") || surface.includes("ます")) errors.push("・「だ・である」に統一。");
-            if (lastToken.pos === "名詞" && !["非自立", "代名詞"].includes(lastToken.pos_detail_1)) errors.push(`・体言止め禁止。`);
-        }
-
         const iconArea = document.getElementById('resultIcon');
-        const msgArea = document.getElementById('feedbackMsg');
-
         if (errors.length === 0) {
             iconArea.textContent = "○";
             iconArea.className = "success";
-            msgArea.innerHTML = "<strong>合格！</strong>";
-            localStorage.removeItem('timerEndTime');
         } else {
             iconArea.textContent = "×";
             iconArea.className = "error";
-            msgArea.innerHTML = "<strong>改善点：</strong><br>" + errors.join("<br>");
         }
     }
 
     document.getElementById('summaryInput').addEventListener('input', function() {
         document.getElementById('currentCount').textContent = this.value.length;
     });
-
-    window.onload = () => {
-        const savedEndTime = localStorage.getItem('timerEndTime');
-        if (savedEndTime && Date.now() < savedEndTime) {
-            document.getElementById('summaryInput').disabled = false;
-            document.getElementById('startBtn').disabled = true;
-            document.getElementById('submitBtn').disabled = false;
-            runTimer(savedEndTime);
-        }
-    };
 </script>
 </body>
 </html>
