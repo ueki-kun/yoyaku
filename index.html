@@ -3,48 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>極・原稿用紙要約アプリ</title>
-    <script src="https://unpkg.com/kuromoji@0.1.2/build/kuromoji.js"></script>
+    <title>極・原稿用紙要約アプリ(BudouX版)</title>
+    <script src="https://unpkg.com/budoux/bundle/budoux-ja.min.js"></script>
     <style>
         :root { --paper-color: #fff9ed; --grid-color: #ff9e9e; }
         body { font-family: sans-serif; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; margin: 0; background-color: #d7d7d7; padding-top: 20px; }
-        
-        /* ロード画面の設定 */
-        #loadingOverlay {
-            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-            background: #ffffff; display: flex; flex-direction: column; justify-content: center; align-items: center;
-            z-index: 2000; transition: opacity 0.5s ease;
-        }
-        .progress-container {
-            width: 70%; max-width: 300px; height: 12px; background: #eee;
-            border-radius: 6px; overflow: hidden; margin-top: 20px; border: 1px solid #ddd;
-        }
-        #progressBar { width: 0%; height: 100%; background: #b56565; transition: width 0.4s ease; }
-        #loadingText { font-size: 0.85rem; color: #555; margin-top: 12px; font-weight: bold; text-align: center; padding: 0 20px; }
-
-        /* アプリ本体のレイアウト */
-        .container { background: var(--paper-color); padding: 1.5rem; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); width: 90%; max-width: 480px; text-align: center; border: 2px solid #b56565; margin-bottom: 20px; }
+        .container { background: var(--paper-color); padding: 1.5rem; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); width: 90%; max-width: 480px; text-align: center; border: 2px solid #b56565; }
         #timer { font-size: 2.5rem; font-weight: bold; color: #37474f; margin-bottom: 0.5rem; }
         #resultIcon { font-size: 4rem; line-height: 1; margin: 5px 0; min-height: 1.2em; }
-        .success { color: #4caf50; }
-        .error { color: #f44336; }
-
-        /* 原稿用紙エリア */
-        .genko-scroll-container { width: 100%; overflow: hidden; display: flex; justify-content: center; margin-bottom: 10px; }
-        .genko-wrapper { background-color: white; border: 1px solid var(--grid-color); display: inline-block; transform-origin: top center; }
-        
-        textarea { 
-            width: 401px; height: 401px; border: none; resize: none; font-size: 24px; 
-            line-height: 40px; letter-spacing: 16px; padding: 0 0 0 8px; background: #ffffff;
-            background-image: linear-gradient(to bottom, transparent 39px, var(--grid-color) 40px), linear-gradient(90deg, transparent 39px, var(--grid-color) 40px);
-            background-size: 40px 40px; font-family: 'Courier New', monospace; display: block;
-        }
-        textarea:focus { outline: none; }
-        textarea:disabled { background-color: #f5f5f5; }
-
+        .genko-wrapper { background-color: white; border: 1px solid var(--grid-color); display: inline-block; }
+        textarea { width: 401px; height: 401px; border: none; resize: none; font-size: 24px; line-height: 40px; letter-spacing: 16px; padding: 0 0 0 8px; background-image: linear-gradient(to bottom, transparent 39px, var(--grid-color) 40px), linear-gradient(90deg, transparent 39px, var(--grid-color) 40px); background-size: 40px 40px; font-family: 'Courier New', monospace; display: block; }
         .info-row { display: flex; justify-content: space-between; margin: 5px 0; font-size: 0.85rem; color: #b56565; }
         #feedbackMsg { font-size: 0.8rem; text-align: left; margin: 10px 0; min-height: 4em; padding: 10px; border: 1px dashed var(--grid-color); background: rgba(255,255,255,0.6); line-height: 1.4; white-space: pre-wrap; }
-        
         .btn-group { display: flex; gap: 8px; }
         button { background-color: #2196f3; color: white; border: none; padding: 14px; border-radius: 12px; cursor: pointer; width: 100%; font-size: 1rem; font-weight: bold; }
         #startBtn { background-color: #ff9800; }
@@ -53,109 +23,83 @@
 </head>
 <body>
 
-<div id="loadingOverlay">
-    <div id="loadingText">解析エンジンを準備中...</div>
-    <div class="progress-container">
-        <div id="progressBar"></div>
-    </div>
-</div>
-
 <div class="container">
     <div id="timer">30:00</div>
     <div id="resultIcon"></div>
-    <div class="genko-scroll-container">
-        <div class="genko-wrapper">
-            <textarea id="summaryInput" maxlength="100" placeholder="「開始」でスタート" disabled></textarea>
-        </div>
+    <div class="genko-wrapper">
+        <textarea id="summaryInput" maxlength="100" placeholder="「開始」でスタート" disabled></textarea>
     </div>
     <div class="info-row">
-        <span id="statusLabel">準備中...</span>
+        <span id="statusLabel">準備完了</span>
         <span><span id="currentCount">0</span> / 100文字</span>
     </div>
     <div id="feedbackMsg"></div>
     <div class="btn-group">
-        <button id="startBtn" onclick="startTraining()" disabled>トレーニング開始</button>
+        <button id="startBtn" onclick="startTraining()">トレーニング開始</button>
         <button id="submitBtn" onclick="analyzeAndSubmit()" disabled>判定して送信</button>
     </div>
 </div>
 
 <script>
-    const DURATION = 30 * 60;
-    let tokenizer = null;
+    const parser = BudouX.loadDefaultJapaneseParser();
     let timerInterval;
 
-    function updateProgress(percent, text) {
-        const bar = document.getElementById('progressBar');
-        const txt = document.getElementById('loadingText');
-        if(bar) bar.style.width = percent + "%";
-        if(txt) txt.textContent = text;
-    }
-
-    // --- 解析エンジンの読み込み (外部サーバー経由) ---
-    function loadKuromoji() {
-        const dicURL = "https://unpkg.com/kuromoji@0.1.2/dict/";
-        updateProgress(30, "辞書データを取得中...");
-
-        kuromoji.builder({ dicPath: dicURL }).build((err, _tokenizer) => {
-            if (err) {
-                console.error("ロード失敗原因:", err);
-                // PCで止まる理由を表示
-                updateProgress(0, "エラー：PCのセキュリティ設定により辞書通信が遮断されました。");
-                document.getElementById('loadingText').style.color = "#f44336";
-                return;
-            }
-
-            updateProgress(85, "エンジン起動...");
-            tokenizer = _tokenizer;
-            setTimeout(() => {
-                updateProgress(100, "準備完了！");
-                const overlay = document.getElementById('loadingOverlay');
-                overlay.style.opacity = '0';
-                setTimeout(() => {
-                    overlay.style.display = 'none';
-                    document.getElementById('startBtn').disabled = false;
-                    document.getElementById('statusLabel').textContent = "準備完了";
-                }, 500);
-            }, 300);
-        });
-    }
-
-    // 実行
-    loadKuromoji();
-
-    // トレーニング開始
-    async function startTraining() {
+    function startTraining() {
         const input = document.getElementById('summaryInput');
         input.disabled = false;
         input.focus();
         document.getElementById('startBtn').disabled = true;
         document.getElementById('submitBtn').disabled = false;
-        document.getElementById('statusLabel').textContent = "計測中...";
-        runTimer(Date.now() + DURATION * 1000);
-    }
-
-    function runTimer(endTime) {
-        if (timerInterval) clearInterval(timerInterval);
+        const endTime = Date.now() + 1800000;
         timerInterval = setInterval(() => {
             const remaining = Math.ceil((endTime - Date.now()) / 1000);
-            if (remaining <= 0) {
-                document.getElementById('timer').textContent = "00:00";
-                clearInterval(timerInterval);
-                return;
-            }
-            const mins = Math.floor(remaining / 60);
-            const secs = remaining % 60;
-            document.getElementById('timer').textContent = `${mins}:${secs.toString().padStart(2, '0')}`;
+            if (remaining <= 0) { clearInterval(timerInterval); return; }
+            document.getElementById('timer').textContent = `${Math.floor(remaining/60)}:${(remaining%60).toString().padStart(2,'0')}`;
         }, 1000);
     }
 
-    // 精密な文章解析
     function analyzeAndSubmit() {
         const text = document.getElementById('summaryInput').value.trim();
-        if (!text || !tokenizer) return;
+        if (!text) return;
 
-        const tokens = tokenizer.tokenize(text);
         let errors = [];
+        // BudouXで文章を意味の区切りに分割
+        const phrases = parser.parse(text);
 
-        // 1. NGワードチェック
-        const ngWords = ["えーと", "あのー", "なんか", "
+        // 1. です・ます判定（文末に「です」「ます」「でした」「ました」があるか）
+        const desumasuPattern = /(です|ます|でした|ました)(。|！|？|)$/;
+        if (desumasuPattern.test(text)) {
+            errors.push("・「です・ます」が含まれています。「だ・である」に直しましょう。");
+        }
+
+        // 2. NGワード（話し言葉）チェック
+        const ngWords = ["えーと", "あのー", "なんか", "マジで", "ヤバい"];
+        ngWords.forEach(word => {
+            if (text.includes(word)) errors.push(`・不要な言葉:「${word}」`);
+        });
+
+        // 3. 文末の締まりチェック（体言止め等の簡易判定）
+        const lastPhrase = phrases[phrases.length - 1];
+        const okEnds = ["だ", "た", "る", "ない", "い"];
+        if (!okEnds.some(end => lastPhrase.endsWith(end)) && !text.endsWith("。")) {
+            errors.push("・文末を「〜だ」「〜た」などで適切に締めてください。");
+        }
+
+        const iconArea = document.getElementById('resultIcon');
+        const msgArea = document.getElementById('feedbackMsg');
+
+        if (errors.length === 0) {
+            iconArea.textContent = "○"; iconArea.className = "success";
+            msgArea.innerHTML = "<strong>合格！</strong> 正確な要約です。";
+        } else {
+            iconArea.textContent = "×"; iconArea.className = "error";
+            msgArea.innerHTML = "<strong>修正ポイント：</strong><br>" + errors.join("<br>");
+        }
+    }
+
+    document.getElementById('summaryInput').addEventListener('input', function() {
+        document.getElementById('currentCount').textContent = this.value.length;
+    });
+</script>
+</body>
+</html>
