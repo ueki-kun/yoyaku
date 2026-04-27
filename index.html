@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>極・原稿用紙要約アプリ(Pro版)</title>
+    <title>極・原稿用紙要約アプリ(極限版)</title>
     <style>
         :root { --paper-color: #fff9ed; --grid-color: #ff9e9e; }
         body { font-family: sans-serif; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; margin: 0; background-color: #d7d7d7; padding-top: 20px; }
@@ -11,7 +11,7 @@
         #timer { font-size: 2.5rem; font-weight: bold; color: #37474f; margin-bottom: 0.5rem; }
         .genko-wrapper { background-color: white; border: 1px solid var(--grid-color); display: inline-block; margin-bottom: 10px; }
         textarea { width: 401px; height: 401px; border: none; resize: none; font-size: 24px; line-height: 40px; letter-spacing: 16px; padding: 0 0 0 8px; background-image: linear-gradient(to bottom, transparent 39px, var(--grid-color) 40px), linear-gradient(90deg, transparent 39px, var(--grid-color) 40px); background-size: 40px 40px; font-family: 'Courier New', monospace; display: block; outline: none; }
-        #resultOverlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: none; flex-direction: column; justify-content: center; align-items: center; background: rgba(255, 255, 255, 0.95); z-index: 100; }
+        #resultOverlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: none; flex-direction: column; justify-content: center; align-items: center; background: rgba(255, 255, 255, 0.98); z-index: 100; }
         .result-card { background: white; width: 85%; padding: 25px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); border: 2px solid #333; }
         #resTitle { font-size: 1.6rem; font-weight: bold; margin-bottom: 10px; }
         #resDetails { font-size: 0.85rem; text-align: left; color: #333; line-height: 1.6; margin-bottom: 20px; max-height: 350px; overflow-y: auto; }
@@ -31,7 +31,7 @@
         <textarea id="summaryInput" maxlength="100" placeholder="「開始」でスタート" disabled></textarea>
     </div>
     <div style="display:flex; justify-content:space-between; font-size:0.8rem; color:#b56565; margin-bottom:10px;">
-        <span>精度: プロフェッショナル設定</span>
+        <span>判定精度: 極限（要約検定仕様）</span>
         <span><span id="currentCount">0</span> / 100文字</span>
     </div>
     <div class="btn-group">
@@ -42,7 +42,7 @@
         <div class="result-card">
             <div id="resTitle"></div>
             <div id="resDetails"></div>
-            <button class="retry-btn" onclick="closeResult()">内容を修正する</button>
+            <button class="retry-btn" onclick="closeResult()">再考する</button>
         </div>
     </div>
 </div>
@@ -71,46 +71,53 @@
 
         var errors = [];
 
-        // 1. です・ます/丁寧語
-        if (/(です|ます|でした|ました|ございます)/.test(text)) {
-            errors.push("・<b>ですます調</b>を「だ・である」に統一してください。");
+        // 1. 口語表現（独り言系）を厳格に排除
+        if (/(かな|だろうか|かなあ|かも|ね|よ)(。|！|？|)$/.test(text) || /(かな|だろうか|かなあ|かも|ね|よ)[\s　]/.test(text)) {
+            errors.push("・<b>主観的な問いかけ</b>（〜かな等）が含まれています。客観的な事実に直してください。");
         }
 
-        // 2. NGワード（基本）
-        var ngWords = ["えーと", "あのー", "なんか", "マジで", "ヤバい", "多分", "自分なりに", "ちょっと", "すごく"];
+        // 2. 口語的な接続助詞
+        if (/(けど|だし|とか|たりして)/.test(text)) {
+            errors.push("・口語的な接続（<b>〜けど、〜だし</b>等）を「〜が、〜であり」等の文語に変えてください。");
+        }
+
+        // 3. 曖昧な副詞
+        var fuzzyWords = ["かなり", "けっこう", "だいぶ", "すごく", "めちゃ", "とっても", "あまり"];
+        fuzzyWords.forEach(function(word) {
+            if (text.indexOf(word) !== -1) errors.push("・曖昧な強調表現: <b>「" + word + "」</b>は要約に不適切です。");
+        });
+
+        // 4. です・ます/丁寧語（再確認）
+        if (/(です|ます|でした|ました|ございます)/.test(text)) {
+            errors.push("・<b>ですます調</b>を完全に排除し、「だ・である」に統一してください。");
+        }
+
+        // 5. NGワード（基本）
+        var ngWords = ["えーと", "あのー", "なんか", "マジで", "ヤバい", "多分", "思う", "自分なりに", "ちょっと"];
         ngWords.forEach(function(word) {
             if (text.indexOf(word) !== -1) errors.push("・不適切表現: <b>「" + word + "」</b>を削除。");
         });
 
-        // 3. 二重否定（まどろっこしい表現）
-        if (/(ないわけではない|なくはない|ないことはない)/.test(text)) {
-            errors.push("・<b>二重否定</b>（〜ないわけではない等）は避け、言い切りましょう。");
+        // 6. 文末の3連続重複（より厳密な判定）
+        var sentenceEnds = text.match(/[^。]+。/g);
+        if (sentenceEnds && sentenceEnds.length >= 3) {
+            var ends = sentenceEnds.map(s => s.slice(-2, -1)); // 句点の前の文字を取得
+            for (var i = 0; i < ends.length - 2; i++) {
+                if (ends[i] === ends[i+1] && ends[i+1] === ends[i+2]) {
+                    errors.push("・<b>文末のリズム</b>が単調です（「〜だ。」等の3回連続）。");
+                    break;
+                }
+            }
         }
 
-        // 4. 文末の3連続重複（単調なリズムの防止）
-        if (/(だ|た|る|ない|い)。\s*.*\1。\s*.*\1。/.test(text)) {
-            errors.push("・<b>同じ文末</b>が3回以上続いています。語尾に変化をつけてください。");
+        // 7. 記号の禁止
+        if (/[！!？?♪☆★]/.test(text)) {
+            errors.push("・<b>記号</b>（！や？）の使用は禁止です。");
         }
 
-        // 5. 不要な記号
-        if (/[！!？?♪☆★]/.test(text) || text.includes("w")) {
-            errors.push("・要約に<b>記号（！や？）</b>やネットスラングは不要です。");
-        }
-
-        // 6. 冗長な文頭
-        if (/^(そして|しかし|ですが|また|なので)/.test(text)) {
-            errors.push("・<b>文頭の接続詞</b>はなるべく削り、文脈でつなげてください。");
-        }
-
-        // 7. 「こと」「もの」の多用
-        var kotoCount = (text.match(/こと/g) || []).length;
-        if (kotoCount >= 3) {
-            errors.push("・<b>「こと」</b>が多用されています。具体的な名詞に言い換えましょう。");
-        }
-
-        // 8. 文末チェック
+        // 8. 文末の基本的な締め
         if (!/[だたるないい。]$/.test(text)) {
-            errors.push("・文末が不自然です。句点で終わるか適切に締めてください。");
+            errors.push("・<b>文末</b>を「だ・である」調の適切な終止形で締めてください。");
         }
 
         var overlay = document.getElementById('resultOverlay');
@@ -119,13 +126,13 @@
         overlay.style.display = "flex";
 
         if (errors.length === 0) {
-            title.textContent = "合格（プロ水準）";
+            title.textContent = "合格（極限水準）";
             title.style.color = "#2e7d32";
-            details.innerHTML = "完璧です。洗練された無駄のない文章です。";
+            details.innerHTML = "非の打ち所がない、完璧な要約文です。";
         } else {
             title.textContent = "要修正";
             title.style.color = "#d32f2f";
-            details.innerHTML = "<b>文章をより良くするためのポイント：</b><br><br>" + errors.join("<br>");
+            details.innerHTML = "<b>これらは要約として認められません：</b><br><br>" + errors.join("<br>");
         }
     }
 
