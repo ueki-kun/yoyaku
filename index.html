@@ -4,27 +4,17 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>極・原稿用紙要約アプリ</title>
-    <script src="https://unpkg.com/budoux/bundle/budoux-ja.min.js"></script>
     <style>
         :root { --paper-color: #fff9ed; --grid-color: #ff9e9e; }
         body { font-family: sans-serif; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; margin: 0; background-color: #d7d7d7; padding-top: 20px; }
-        
         .container { background: var(--paper-color); padding: 1.5rem; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.2); width: 90%; max-width: 480px; text-align: center; border: 2px solid #b56565; position: relative; }
         #timer { font-size: 2.5rem; font-weight: bold; color: #37474f; margin-bottom: 0.5rem; }
-        
         .genko-wrapper { background-color: white; border: 1px solid var(--grid-color); display: inline-block; margin-bottom: 10px; }
         textarea { width: 401px; height: 401px; border: none; resize: none; font-size: 24px; line-height: 40px; letter-spacing: 16px; padding: 0 0 0 8px; background-image: linear-gradient(to bottom, transparent 39px, var(--grid-color) 40px), linear-gradient(90deg, transparent 39px, var(--grid-color) 40px); background-size: 40px 40px; font-family: 'Courier New', monospace; display: block; outline: none; }
-        
-        /* 結果表示画面 */
-        #resultOverlay {
-            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
-            display: none; flex-direction: column; justify-content: center; align-items: center;
-            background: rgba(255, 255, 255, 0.95); z-index: 100;
-        }
+        #resultOverlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: none; flex-direction: column; justify-content: center; align-items: center; background: rgba(255, 255, 255, 0.95); z-index: 100; }
         .result-card { background: white; width: 85%; padding: 25px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); border: 2px solid #333; }
         #resTitle { font-size: 1.8rem; font-weight: bold; margin-bottom: 15px; }
         #resDetails { font-size: 0.95rem; text-align: left; color: #333; line-height: 1.7; margin-bottom: 25px; }
-
         .btn-group { display: flex; gap: 8px; }
         button { flex: 1; background-color: #2196f3; color: white; border: none; padding: 14px; border-radius: 12px; cursor: pointer; font-size: 1rem; font-weight: bold; }
         #startBtn { background-color: #ff9800; }
@@ -36,21 +26,17 @@
 
 <div class="container">
     <div id="timer">30:00</div>
-    
     <div class="genko-wrapper">
         <textarea id="summaryInput" maxlength="100" placeholder="「開始」でスタート" disabled></textarea>
     </div>
-
     <div style="display:flex; justify-content:space-between; font-size:0.8rem; color:#b56565; margin-bottom:10px;">
-        <span id="statusLabel">準備完了</span>
+        <span>準備完了</span>
         <span><span id="currentCount">0</span> / 100文字</span>
     </div>
-
     <div class="btn-group">
         <button id="startBtn" onclick="startTraining()">トレーニング開始</button>
         <button id="submitBtn" onclick="analyzeAndSubmit()" disabled>判定して送信</button>
     </div>
-
     <div id="resultOverlay">
         <div class="result-card">
             <div id="resTitle"></div>
@@ -61,69 +47,70 @@
 </div>
 
 <script>
-    // BudouXエンジンの準備
-    const parser = BudouX.loadDefaultJapaneseParser();
-    let timerInterval;
+    // --- 1. すべての変数を「一番最初」に定義する（エラー対策） ---
+    var timerInterval = null;
+    var currentTimerSeconds = 1800;
 
+    // --- 2. トレーニング開始処理 ---
     function startTraining() {
-        document.getElementById('summaryInput').disabled = false;
-        document.getElementById('summaryInput').focus();
+        var input = document.getElementById('summaryInput');
+        input.disabled = false;
+        input.focus();
         document.getElementById('startBtn').disabled = true;
         document.getElementById('submitBtn').disabled = false;
+
+        if (timerInterval) clearInterval(timerInterval);
         
-        let timeLeft = 1800;
-        timerInterval = setInterval(() => {
-            timeLeft--;
-            if (timeLeft <= 0) { clearInterval(timerInterval); return; }
-            const m = Math.floor(timeLeft / 60);
-            const s = timeLeft % 60;
-            document.getElementById('timer').textContent = `${m}:${s.toString().padStart(2, '0')}`;
+        timerInterval = setInterval(function() {
+            currentTimerSeconds--;
+            if (currentTimerSeconds <= 0) {
+                clearInterval(timerInterval);
+                return;
+            }
+            var m = Math.floor(currentTimerSeconds / 60);
+            var s = currentTimerSeconds % 60;
+            document.getElementById('timer').textContent = m + ":" + (s < 10 ? "0" + s : s);
         }, 1000);
     }
 
+    // --- 3. 判定処理（BudouXに頼らず正規表現で判定） ---
     function analyzeAndSubmit() {
-        const text = document.getElementById('summaryInput').value.trim();
+        var text = document.getElementById('summaryInput').value.trim();
         if (!text) return;
 
-        let errors = [];
-        
-        // BudouXで文節（言葉の区切り）に分割
-        const phrases = parser.parse(text);
+        var errors = [];
 
-        // 1. です・ますチェック
-        if (/(です|ます|でした|ました)(。|！|？|)$/.test(text)) {
-            errors.push("・「です・ます」調が使われています。「だ・である」に直してください。");
+        // ですます判定
+        if (/(です|ます|でした|ました)/.test(text)) {
+            errors.push("・「です・ます」が含まれています。");
         }
 
-        // 2. 不要な話し言葉チェック
-        const ngWords = ["えーと", "あのー", "なんか", "マジで", "多分"];
-        ngWords.forEach(word => {
-            if (text.includes(word)) errors.push(`・不適切な表現「${word}」が含まれています。`);
+        // NGワード判定
+        var ngWords = ["えーと", "あのー", "なんか", "マジで"];
+        ngWords.forEach(function(word) {
+            if (text.indexOf(word) !== -1) errors.push("・不要な表現「" + word + "」があります。");
         });
 
-        // 3. 文末チェック（BudouXの解析を利用）
-        const lastPhrase = phrases[phrases.length - 1];
-        const okEnds = ["だ", "た", "る", "ない", "い", "。"];
-        const isOkEnd = okEnds.some(end => lastPhrase.endsWith(end));
-        if (!isOkEnd) {
-            errors.push("・文末が不自然です。文章を適切に締めくくってください。");
+        // 文末判定（簡易版：だ・た・る・ない・い・。 で終わっているか）
+        if (!/[だたるないい。]$/.test(text)) {
+            errors.push("・文末を適切に締めてください。");
         }
 
-        // 結果表示の処理
-        const overlay = document.getElementById('resultOverlay');
-        const title = document.getElementById('resTitle');
-        const details = document.getElementById('resDetails');
+        // 結果画面の表示
+        var overlay = document.getElementById('resultOverlay');
+        var title = document.getElementById('resTitle');
+        var details = document.getElementById('resDetails');
 
         overlay.style.display = "flex";
 
         if (errors.length === 0) {
             title.textContent = "合格";
             title.style.color = "#2e7d32";
-            details.innerHTML = "素晴らしい要約です。ルール通り「だ・である」調で簡潔にまとめられています。";
+            details.innerHTML = "素晴らしい要約です。ルールが守られています。";
         } else {
             title.textContent = "要修正";
             title.style.color = "#d32f2f";
-            details.innerHTML = "以下の点を確認して、書き直してみましょう：<br><br>" + errors.join("<br>");
+            details.innerHTML = "修正ポイント：<br><br>" + errors.join("<br>");
         }
     }
 
@@ -131,6 +118,7 @@
         document.getElementById('resultOverlay').style.display = "none";
     }
 
+    // 文字数カウント
     document.getElementById('summaryInput').addEventListener('input', function() {
         document.getElementById('currentCount').textContent = this.value.length;
     });
