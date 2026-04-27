@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>極・原稿用紙要約アプリ</title>
+    <title>極・原稿用紙要約アプリ(Pro版)</title>
     <style>
         :root { --paper-color: #fff9ed; --grid-color: #ff9e9e; }
         body { font-family: sans-serif; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; margin: 0; background-color: #d7d7d7; padding-top: 20px; }
@@ -13,13 +13,14 @@
         textarea { width: 401px; height: 401px; border: none; resize: none; font-size: 24px; line-height: 40px; letter-spacing: 16px; padding: 0 0 0 8px; background-image: linear-gradient(to bottom, transparent 39px, var(--grid-color) 40px), linear-gradient(90deg, transparent 39px, var(--grid-color) 40px); background-size: 40px 40px; font-family: 'Courier New', monospace; display: block; outline: none; }
         #resultOverlay { position: absolute; top: 0; left: 0; width: 100%; height: 100%; display: none; flex-direction: column; justify-content: center; align-items: center; background: rgba(255, 255, 255, 0.95); z-index: 100; }
         .result-card { background: white; width: 85%; padding: 25px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); border: 2px solid #333; }
-        #resTitle { font-size: 1.8rem; font-weight: bold; margin-bottom: 15px; }
-        #resDetails { font-size: 0.95rem; text-align: left; color: #333; line-height: 1.7; margin-bottom: 25px; }
+        #resTitle { font-size: 1.6rem; font-weight: bold; margin-bottom: 10px; }
+        #resDetails { font-size: 0.85rem; text-align: left; color: #333; line-height: 1.6; margin-bottom: 20px; max-height: 350px; overflow-y: auto; }
         .btn-group { display: flex; gap: 8px; }
         button { flex: 1; background-color: #2196f3; color: white; border: none; padding: 14px; border-radius: 12px; cursor: pointer; font-size: 1rem; font-weight: bold; }
         #startBtn { background-color: #ff9800; }
         .retry-btn { background-color: #444; width: 100%; }
         button:disabled { background-color: #b0bec5; }
+        b { color: #d32f2f; }
     </style>
 </head>
 <body>
@@ -30,7 +31,7 @@
         <textarea id="summaryInput" maxlength="100" placeholder="「開始」でスタート" disabled></textarea>
     </div>
     <div style="display:flex; justify-content:space-between; font-size:0.8rem; color:#b56565; margin-bottom:10px;">
-        <span>準備完了</span>
+        <span>精度: プロフェッショナル設定</span>
         <span><span id="currentCount">0</span> / 100文字</span>
     </div>
     <div class="btn-group">
@@ -41,76 +42,90 @@
         <div class="result-card">
             <div id="resTitle"></div>
             <div id="resDetails"></div>
-            <button class="retry-btn" onclick="closeResult()">もう一度挑戦する</button>
+            <button class="retry-btn" onclick="closeResult()">内容を修正する</button>
         </div>
     </div>
 </div>
 
 <script>
-    // --- 1. すべての変数を「一番最初」に定義する（エラー対策） ---
     var timerInterval = null;
-    var currentTimerSeconds = 1800;
+    var timeLeft = 1800;
 
-    // --- 2. トレーニング開始処理 ---
     function startTraining() {
-        var input = document.getElementById('summaryInput');
-        input.disabled = false;
-        input.focus();
+        document.getElementById('summaryInput').disabled = false;
+        document.getElementById('summaryInput').focus();
         document.getElementById('startBtn').disabled = true;
         document.getElementById('submitBtn').disabled = false;
-
-        if (timerInterval) clearInterval(timerInterval);
-        
         timerInterval = setInterval(function() {
-            currentTimerSeconds--;
-            if (currentTimerSeconds <= 0) {
-                clearInterval(timerInterval);
-                return;
-            }
-            var m = Math.floor(currentTimerSeconds / 60);
-            var s = currentTimerSeconds % 60;
+            timeLeft--;
+            if (timeLeft <= 0) { clearInterval(timerInterval); return; }
+            var m = Math.floor(timeLeft / 60);
+            var s = timeLeft % 60;
             document.getElementById('timer').textContent = m + ":" + (s < 10 ? "0" + s : s);
         }, 1000);
     }
 
-    // --- 3. 判定処理（BudouXに頼らず正規表現で判定） ---
     function analyzeAndSubmit() {
         var text = document.getElementById('summaryInput').value.trim();
         if (!text) return;
 
         var errors = [];
 
-        // ですます判定
-        if (/(です|ます|でした|ました)/.test(text)) {
-            errors.push("・「です・ます」が含まれています。");
+        // 1. です・ます/丁寧語
+        if (/(です|ます|でした|ました|ございます)/.test(text)) {
+            errors.push("・<b>ですます調</b>を「だ・である」に統一してください。");
         }
 
-        // NGワード判定
-        var ngWords = ["えーと", "あのー", "なんか", "マジで"];
+        // 2. NGワード（基本）
+        var ngWords = ["えーと", "あのー", "なんか", "マジで", "ヤバい", "多分", "自分なりに", "ちょっと", "すごく"];
         ngWords.forEach(function(word) {
-            if (text.indexOf(word) !== -1) errors.push("・不要な表現「" + word + "」があります。");
+            if (text.indexOf(word) !== -1) errors.push("・不適切表現: <b>「" + word + "」</b>を削除。");
         });
 
-        // 文末判定（簡易版：だ・た・る・ない・い・。 で終わっているか）
-        if (!/[だたるないい。]$/.test(text)) {
-            errors.push("・文末を適切に締めてください。");
+        // 3. 二重否定（まどろっこしい表現）
+        if (/(ないわけではない|なくはない|ないことはない)/.test(text)) {
+            errors.push("・<b>二重否定</b>（〜ないわけではない等）は避け、言い切りましょう。");
         }
 
-        // 結果画面の表示
+        // 4. 文末の3連続重複（単調なリズムの防止）
+        if (/(だ|た|る|ない|い)。\s*.*\1。\s*.*\1。/.test(text)) {
+            errors.push("・<b>同じ文末</b>が3回以上続いています。語尾に変化をつけてください。");
+        }
+
+        // 5. 不要な記号
+        if (/[！!？?♪☆★]/.test(text) || text.includes("w")) {
+            errors.push("・要約に<b>記号（！や？）</b>やネットスラングは不要です。");
+        }
+
+        // 6. 冗長な文頭
+        if (/^(そして|しかし|ですが|また|なので)/.test(text)) {
+            errors.push("・<b>文頭の接続詞</b>はなるべく削り、文脈でつなげてください。");
+        }
+
+        // 7. 「こと」「もの」の多用
+        var kotoCount = (text.match(/こと/g) || []).length;
+        if (kotoCount >= 3) {
+            errors.push("・<b>「こと」</b>が多用されています。具体的な名詞に言い換えましょう。");
+        }
+
+        // 8. 文末チェック
+        if (!/[だたるないい。]$/.test(text)) {
+            errors.push("・文末が不自然です。句点で終わるか適切に締めてください。");
+        }
+
         var overlay = document.getElementById('resultOverlay');
         var title = document.getElementById('resTitle');
         var details = document.getElementById('resDetails');
-
         overlay.style.display = "flex";
 
         if (errors.length === 0) {
-            title.textContent = "合格";
+            title.textContent = "合格（プロ水準）";
             title.style.color = "#2e7d32";
-            details.innerHTML = "素晴らしい要約です。ルールが守られています。";
+            details.innerHTML = "完璧です。洗練された無駄のない文章です。";
         } else {
             title.textContent = "要修正";
             title.style.color = "#d32f2f";
-            details.innerHTML = "修正ポイント：<br><br>" + errors.join("<br>");
+            details.innerHTML = "<b>文章をより良くするためのポイント：</b><br><br>" + errors.join("<br>");
         }
     }
 
@@ -118,7 +133,6 @@
         document.getElementById('resultOverlay').style.display = "none";
     }
 
-    // 文字数カウント
     document.getElementById('summaryInput').addEventListener('input', function() {
         document.getElementById('currentCount').textContent = this.value.length;
     });
