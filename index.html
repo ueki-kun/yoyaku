@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>極・原稿用紙要約アプリ(リセット機能付)</title>
+    <title>極・原稿用紙要約アプリ</title>
+    <link rel="manifest" href="manifest.json">
     <style>
         :root { --paper-color: #fff9ed; --grid-color: #ff9e9e; }
         body { font-family: sans-serif; display: flex; justify-content: center; align-items: flex-start; min-height: 100vh; margin: 0; background-color: #d7d7d7; padding-top: 20px; }
@@ -15,13 +16,11 @@
         .result-card { background: white; width: 85%; padding: 25px; border-radius: 15px; box-shadow: 0 10px 30px rgba(0,0,0,0.2); border: 2px solid #333; }
         #resTitle { font-size: 1.6rem; font-weight: bold; margin-bottom: 10px; }
         #resDetails { font-size: 0.85rem; text-align: left; color: #333; line-height: 1.6; margin-bottom: 20px; max-height: 350px; overflow-y: auto; }
-        
-        /* ボタンレイアウト */
         .btn-group { display: flex; gap: 8px; flex-wrap: wrap; }
         button { flex: 1; min-width: 100px; color: white; border: none; padding: 14px; border-radius: 12px; cursor: pointer; font-size: 1rem; font-weight: bold; }
         #startBtn { background-color: #ff9800; }
         #submitBtn { background-color: #2196f3; }
-        #resetBtn { background-color: #78909c; } /* リセットボタンの色 */
+        #resetBtn { background-color: #78909c; }
         .retry-btn { background-color: #444; width: 100%; }
         button:disabled { background-color: #b0bec5; cursor: not-allowed; }
         b { color: #d32f2f; }
@@ -35,16 +34,14 @@
         <textarea id="summaryInput" maxlength="100" placeholder="「開始」でスタート" disabled></textarea>
     </div>
     <div style="display:flex; justify-content:space-between; font-size:0.8rem; color:#b56565; margin-bottom:10px;">
-        <span>判定精度: 極限（リセット機能付）</span>
+        <span>判定精度: 極限（PWA版）</span>
         <span><span id="currentCount">0</span> / 100文字</span>
     </div>
-
     <div class="btn-group">
         <button id="startBtn" onclick="startTraining()">開始</button>
         <button id="submitBtn" onclick="analyzeAndSubmit()" disabled>判定</button>
         <button id="resetBtn" onclick="resetApp()">リセット</button>
     </div>
-
     <div id="resultOverlay">
         <div class="result-card">
             <div id="resTitle"></div>
@@ -55,11 +52,21 @@
 </div>
 
 <script>
+    // --- サービスワーカーの登録コード ---
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js')
+        .then(() => {
+            // 通知の許可を求める
+            if (Notification.permission === 'default') {
+                Notification.requestPermission();
+            }
+        });
+    }
+
     var timerInterval = null;
-    var defaultSeconds = 1800; // 30分
+    var defaultSeconds = 1800;
     var timeLeft = defaultSeconds;
 
-    // トレーニング開始
     function startTraining() {
         var input = document.getElementById('summaryInput');
         input.disabled = false;
@@ -73,93 +80,59 @@
             if (timeLeft <= 0) {
                 clearInterval(timerInterval);
                 document.getElementById('timer').textContent = "0:00";
+                // --- サービスワーカーに通知を依頼 ---
+                if (navigator.serviceWorker.controller) {
+                    navigator.serviceWorker.controller.postMessage({type: 'TIMER_DONE'});
+                }
                 return;
             }
             updateTimerDisplay();
         }, 1000);
     }
 
-    // リセット処理
     function resetApp() {
-        // 1. タイマー停止
         if (timerInterval) clearInterval(timerInterval);
-        
-        // 2. 状態を初期化
         timeLeft = defaultSeconds;
         updateTimerDisplay();
-        
-        // 3. 入力欄をクリアして無効化
         var input = document.getElementById('summaryInput');
         input.value = "";
         input.disabled = true;
         document.getElementById('currentCount').textContent = "0";
-        
-        // 4. ボタンの状態を戻す
         document.getElementById('startBtn').disabled = false;
         document.getElementById('submitBtn').disabled = true;
-        
-        // 5. オーバーレイが出ていれば閉じる
         closeResult();
     }
 
-    // タイマー表示更新
     function updateTimerDisplay() {
         var m = Math.floor(timeLeft / 60);
         var s = timeLeft % 60;
         document.getElementById('timer').textContent = m + ":" + (s < 10 ? "0" + s : s);
     }
 
-    // 判定処理（極限版ルール）
     function analyzeAndSubmit() {
         var text = document.getElementById('summaryInput').value.trim();
         if (!text) return;
-
         var errors = [];
-
-        if (/(です|ます|でした|ました|ございます)/.test(text)) {
-            errors.push("・<b>ですます調</b>を「だ・である」に統一してください。");
-        }
-
-        if (/(かな|だろうか|かなあ|かも|ね|よ)(。|！|？|)$/.test(text) || /(かな|だろうか|かなあ|かも|ね|よ)[\s　]/.test(text)) {
-            errors.push("・<b>主観的な問いかけ</b>（〜かな等）は排除してください。");
-        }
-
+        if (/(です|ます|でした|ました|ございます)/.test(text)) errors.push("・<b>ですます調</b>を「だ・である」に統一してください。");
+        if (/(かな|だろうか|かなあ|かも|ね|よ)(。|！|？|)$/.test(text) || /(かな|だろうか|かなあ|かも|ね|よ)[\s　]/.test(text)) errors.push("・<b>主観的な問いかけ</b>（〜かな等）は排除。");
         var fuzzyWords = ["かなり", "けっこう", "だいぶ", "すごく", "めちゃ", "とっても", "あまり"];
-        fuzzyWords.forEach(function(word) {
-            if (text.indexOf(word) !== -1) errors.push("・曖昧な強調: <b>「" + word + "」</b>を削除。");
-        });
-
-        if (/[！!？?♪☆★]/.test(text)) {
-            errors.push("・<b>記号</b>の使用は禁止です。");
-        }
-
-        if (!/[だたるないい。]$/.test(text)) {
-            errors.push("・<b>文末</b>を適切に締めてください。");
-        }
+        fuzzyWords.forEach(function(word) { if (text.indexOf(word) !== -1) errors.push("・曖昧表現: <b>「" + word + "」</b>"); });
+        if (/[！!？?♪☆★]/.test(text)) errors.push("・<b>記号</b>の使用禁止。");
+        if (!/[だたるないい。]$/.test(text)) errors.push("・<b>文末</b>を適切に締めてください。");
 
         var overlay = document.getElementById('resultOverlay');
         var title = document.getElementById('resTitle');
         var details = document.getElementById('resDetails');
         overlay.style.display = "flex";
-
         if (errors.length === 0) {
-            title.textContent = "合格";
-            title.style.color = "#2e7d32";
-            details.innerHTML = "完璧です。";
+            title.textContent = "合格"; title.style.color = "#2e7d32"; details.innerHTML = "完璧です。";
         } else {
-            title.textContent = "要修正";
-            title.style.color = "#d32f2f";
-            details.innerHTML = "<b>修正ポイント：</b><br><br>" + errors.join("<br>");
+            title.textContent = "要修正"; title.style.color = "#d32f2f"; details.innerHTML = "<b>修正ポイント：</b><br><br>" + errors.join("<br>");
         }
     }
 
-    function closeResult() {
-        document.getElementById('resultOverlay').style.display = "none";
-    }
-
-    document.getElementById('summaryInput').addEventListener('input', function() {
-        document.getElementById('currentCount').textContent = this.value.length;
-    });
+    function closeResult() { document.getElementById('resultOverlay').style.display = "none"; }
+    document.getElementById('summaryInput').addEventListener('input', function() { document.getElementById('currentCount').textContent = this.value.length; });
 </script>
 </body>
 </html>
